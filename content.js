@@ -24,7 +24,10 @@
       // Matches both /c/<id> and project chats at /g/g-p-.../c/<id>
       chatLinkSelector: 'nav a[href*="/c/"]',
       chatHrefPattern: /\/c\/([^?#/]+)/,
-      projectLinkSelector: 'a[href*="/g/g-p-"]:not([href*="/c/"])',
+      // Sidebar only (the page header also links the open project)
+      // Sidebar project rows are <div role="button"> carrying the id/label in
+      // data attributes. (Plain /g/g-p- links also appear in the page header.)
+      projectLinkSelector: 'nav [data-app-action-sidebar-project-row]',
       projectHrefPattern: /\/g\/(g-p-[^/?#]+)/,
       moveMenuItemTexts: ['move to project', '移至專案', '移動至專案', '移到專案', '移至项目', '移动到项目', '移到项目', 'プロジェクトに移動'],
       deleteMenuItemText: 'delete',
@@ -87,10 +90,8 @@
     // only used when the sidebar shows no projects at all.
     var domLinks = Array.from(document.querySelectorAll(SITE.projectLinkSelector));
     domLinks.forEach(function(a) {
-      var m = a.href.match(/[/]g[/](g-p-[^/?#]+)/);
-      if (!m) return;
-      var id = m[1];
-      var name = a.textContent.trim();
+      var id = projectIdOf(a);
+      var name = projectNameOf(a);
       if (name && id && !projects.find(function(x) { return x.id === id; }))
         projects.push({ id: id, name: name });
     });
@@ -134,6 +135,10 @@
       '#bcm3-kicker { display:inline-flex; align-items:center; border:1px solid #343434; border-radius:999px; padding:2px 7px; margin-bottom:7px; color:#d4d4d4; font-size:10px; letter-spacing:.06em; text-transform:uppercase; background:#171717; }',
       '#bcm3-panel h3 { margin:0 0 5px; font-size:15px; font-weight:620; letter-spacing:-.01em; }',
       '#bcm3-sub { margin:0; font-size:12px; color:var(--bcm3-muted); line-height:1.4; }',
+      '#bcm3-tabs { display:flex; gap:4px; margin:0 0 10px; }',
+      '#bcm3-panel .bcm3-tab { flex:1; margin:0; padding:7px 0; border-radius:999px; border:1px solid transparent; background:transparent; color:#a3a3a3; font-weight:600; }',
+      '#bcm3-panel .bcm3-tab:hover { transform:none; color:#f5f5f5; }',
+      '#bcm3-panel .bcm3-tab.bcm3-tab-active { background:#262626; border-color:#333; color:#fafafa; }',
       '#bcm3-count { margin:0 0 9px; color:#d4d4d4; font-size:12px; }',
       '#bcm3-panel select { width:100%; appearance:none; background:#171717; color:var(--bcm3-text); border:1px solid #333; border-radius:10px; padding:8px 10px; margin-bottom:8px; font-size:12px; }',
       '#bcm3-panel select:focus-visible, #bcm3-panel button:focus-visible { outline:2px solid var(--bcm3-focus); outline-offset:2px; }',
@@ -171,11 +176,34 @@
     var el = document.getElementById('bcm3-status');
     if (el) el.textContent = msg;
   }
+  // Which sidebar items get checkboxes: 'chats' or 'projects' (panel tabs)
+  var bcm3Mode = 'chats';
+  function targetSelector() {
+    return bcm3Mode === 'projects' ? SITE.projectLinkSelector : SITE.chatLinkSelector;
+  }
+  function targetPattern() {
+    return bcm3Mode === 'projects' ? SITE.projectHrefPattern : SITE.chatHrefPattern;
+  }
+  // Project rows may be links (id in href) or divs (id in a data attribute)
+  function projectIdOf(el) {
+    var id = el.getAttribute('data-app-action-sidebar-project-id');
+    if (id) return id;
+    var m = (el.getAttribute('href') || '').match(SITE.projectHrefPattern);
+    return m && m[1] || '';
+  }
+  function projectNameOf(el) {
+    return (el.getAttribute('data-app-action-sidebar-project-label') || el.textContent || '').trim();
+  }
+  // Id of a sidebar row for the current mode (chat id or project id)
+  function targetIdOf(el) {
+    if (bcm3Mode === 'projects') return projectIdOf(el);
+    return convIdFromHref(el.getAttribute('href') || '');
+  }
   function updateCount() {
     var all = document.querySelectorAll('.bcm3-cb').length;
     var checked = document.querySelectorAll('.bcm3-cb:checked').length;
     var el = document.getElementById('bcm3-count');
-    if (el) el.textContent = checked + ' of ' + all + ' chats selected';
+    if (el) el.textContent = checked + ' of ' + all + (bcm3Mode === 'projects' ? ' projects' : ' chats') + ' selected';
   }
   var BCM3_QUEUE_KEY = 'bcm3-task-queue-v1';
   var bcm3QueueRunning = false;
@@ -191,15 +219,16 @@
   function clearMoveQueue() {
     try { sessionStorage.removeItem(BCM3_QUEUE_KEY); } catch (e) {}
   }
+  // Id of the current target kind (chat id, or project id in project mode)
   function convIdFromHref(href) {
-    var m = (href || '').match(SITE.chatHrefPattern);
+    var m = (href || '').match(targetPattern());
     return m && m[1] || '';
   }
   function findChatLinkByConvId(convId) {
     if (!convId) return null;
-    var links = Array.from(document.querySelectorAll(SITE.chatLinkSelector));
+    var links = Array.from(document.querySelectorAll(targetSelector()));
     return links.find(function(a) {
-      return convIdFromHref(a.getAttribute('href') || a.href) === convId;
+      return targetIdOf(a) === convId;
     }) || null;
   }
   function enqueueCurrentSelection(action, projectId, projectName) {
@@ -211,6 +240,7 @@
     }).filter(function(x) { return !!x.convId; });
     var queue = {
       action: action || 'move',
+      kind: bcm3Mode,
       projectId: projectId,
       projectName: projectName,
       items: items,
@@ -240,7 +270,7 @@
     return (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
   }
   // Delete labels across UI languages (ChatGPT/Claude localize these)
-  var DELETE_TEXTS = ['delete', 'delete chat', 'delete conversation', '刪除', '删除', '刪除聊天', '删除聊天', '刪除對話', '删除对话', '削除', '삭제'];
+  var DELETE_TEXTS = ['delete', 'delete chat', 'delete conversation', 'delete project', '刪除', '删除', '刪除聊天', '删除聊天', '刪除對話', '删除对话', '刪除專案', '删除项目', '刪除項目', '削除', '삭제'];
   function isDeleteText(s) {
     return DELETE_TEXTS.indexOf(normalizeText(s)) !== -1;
   }
@@ -252,8 +282,9 @@
     }) || items.find(function(el) { return isDeleteText(el.textContent); }) || null;
   }
   // Pin / unpin labels (exact match, so "釘選" never matches "取消釘選")
-  var PIN_TEXTS = ['pin', 'pin chat', '釘選', '置顶', '置頂', '固定', 'ピン留め', '고정'];
-  var UNPIN_TEXTS = ['unpin', 'unpin chat', '取消釘選', '取消置顶', '取消置頂', '取消固定', 'ピン留めを解除', '고정 해제'];
+  // Project menus say "釘選專案" / "取消釘選專案" instead of the bare verb
+  var PIN_TEXTS = ['pin', 'pin chat', 'pin project', '釘選', '釘選專案', '置顶', '置頂', '置顶项目', '固定', 'ピン留め', '고정'];
+  var UNPIN_TEXTS = ['unpin', 'unpin chat', 'unpin project', '取消釘選', '取消釘選專案', '取消置顶', '取消置頂', '取消置顶项目', '取消固定', 'ピン留めを解除', '고정 해제'];
   var ARCHIVE_TEXTS = ['archive', 'archive chat', '封存', '封存對話', '归档', '歸檔', 'アーカイブ', '보관'];
   // Single-click menu actions. doneTexts = menu item shown when the chat is
   // already in the target state (e.g. "取消釘選" means it is already pinned).
@@ -302,7 +333,8 @@
     var node = link.parentElement;
     for (var depth = 0; node && depth < 6; depth++, node = node.parentElement) {
       if (node.tagName === 'NAV') break;
-      if (node.querySelectorAll(SITE.chatLinkSelector).length > 1) break;
+      // Stop once the ancestor also holds another row (chat or project)
+      if (node.querySelectorAll(SITE.chatLinkSelector + ', ' + SITE.projectLinkSelector).length > 1) break;
       btn = findIn(node);
       if (btn) return btn;
     }
@@ -328,21 +360,25 @@
     // Try data-testid first
     var exactConfirm = document.querySelector('button[data-testid="delete-conversation-confirm-button"]');
     if (isVisibleElement(exactConfirm)) return exactConfirm;
-    // Search inside dialog/modal containers
-    var dialogEl = document.querySelector('[role="dialog"]')
-      || document.querySelector('[role="alertdialog"]')
-      || document.querySelector('[data-state="open"]');
-    if (dialogEl) {
-      var dialogBtns = Array.from(dialogEl.querySelectorAll('button')).filter(isVisibleElement);
-      var found = dialogBtns.find(function(b) { return isDeleteText(b.textContent); });
+    // Longer labels, e.g. project delete: 從「對話」和「工作」中刪除
+    function looksLikeDelete(b) {
+      var t = normalizeText(b.textContent);
+      return /刪除|删除|delete|削除|삭제/.test(t) && !/取消|cancel/.test(t);
+    }
+    // Search every visible dialog (the first one in the DOM may be a hidden leftover)
+    var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).filter(isVisibleElement);
+    for (var d = 0; d < dialogs.length; d++) {
+      var dialogBtns = Array.from(dialogs[d].querySelectorAll('button')).filter(isVisibleElement);
+      var found = dialogBtns.find(function(b) { return isDeleteText(b.textContent); })
+        || dialogBtns.find(looksLikeDelete);
       if (found) return found;
     }
-    // Last resort: visible "Delete" button not inside a menu
+    // Last resort: any visible delete-looking button outside menus, the
+    // sidebar and our own panel (some dialogs carry no dialog role)
     var allBtns = Array.from(document.querySelectorAll('button')).filter(isVisibleElement);
     return allBtns.find(function(b) {
-      return isDeleteText(b.textContent)
-        && !b.closest('[role="menu"]')
-        && b.closest('[role="dialog"], [role="alertdialog"], [class*="modal"], [class*="popover"], [data-state="open"]');
+      return looksLikeDelete(b)
+        && !b.closest('[role="menu"], nav, #bcm3-panel');
     }) || null;
   }
   // Wait until the sidebar has at least one chat link rendered
@@ -352,7 +388,7 @@
       var elapsed = 0;
       var interval = 500;
       function check() {
-        if (document.querySelectorAll(SITE.chatLinkSelector).length > 0) {
+        if (document.querySelectorAll(targetSelector()).length > 0) {
           resolve(true);
           return;
         }
@@ -379,6 +415,7 @@
     if (!queue || !queue.items || !queue.items.length) return;
     if (queue.index >= queue.items.length) { clearMoveQueue(); return; }
     bcm3QueueRunning = true;
+    if ((queue.kind || 'chats') !== bcm3Mode) setMode(queue.kind || 'chats');
     try {
       // Wait for sidebar to be fully rendered before doing anything
       setStatus('Waiting for sidebar...');
@@ -606,9 +643,9 @@
     }
     clearMoveQueue();
     if (MENU_ACTIONS[queue.action]) {
-      setStatus('Done! ' + MENU_ACTIONS[queue.action].pastWord + ' ' + queue.moved + '/' + queue.items.length + ' chats.');
+      setStatus('Done! ' + MENU_ACTIONS[queue.action].pastWord + ' ' + queue.moved + '/' + queue.items.length + ' ' + (queue.kind === 'projects' ? 'projects' : 'chats') + '.');
     } else if (queue.action === 'delete') {
-      setStatus('Done! Deleted ' + queue.moved + '/' + queue.items.length + ' chats.');
+      setStatus('Done! Deleted ' + queue.moved + '/' + queue.items.length + ' ' + (queue.kind === 'projects' ? 'projects' : 'chats') + '.');
       // If the chat currently open was deleted, go home instead of staying on a dead URL
       var current = convIdFromHref(location.pathname);
       var deletedOpen = current && queue.items.some(function(x) { return x.convId === current; });
@@ -784,17 +821,21 @@
   // ChatGPT's own nodes: React keeps references to them, and re-parenting them
   // makes React crash ("ChatGPT 遇到問題") or fail to render newly loaded chats.
   function injectCheckboxes() {
-    var links = document.querySelectorAll(SITE.chatLinkSelector);
+    // Drop checkboxes left over from the other tab's kind
+    document.querySelectorAll('.bcm3-cb').forEach(function(cb) {
+      if (cb.dataset.kind !== bcm3Mode) cb.remove();
+    });
+    var links = document.querySelectorAll(targetSelector());
     links.forEach(function(link) {
       if (link.querySelector(':scope > .bcm3-cb')) return;
-      var match = link.href.match(SITE.chatHrefPattern);
-      var convId = match && match[1];
+      var convId = targetIdOf(link);
       if (!convId) return;
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'bcm3-cb';
       cb.dataset.convId = convId;
-      cb.dataset.title = link.textContent.trim().replace(/\s+/g, ' ');
+      cb.dataset.kind = bcm3Mode;
+      cb.dataset.title = (bcm3Mode === 'projects' ? projectNameOf(link) : link.textContent.trim()).replace(/\s+/g, ' ');
       // Keep the link (and React's handlers) from seeing checkbox interactions
       ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function(t) {
         cb.addEventListener(t, function(e) { e.stopPropagation(); });
@@ -814,17 +855,32 @@
     });
     updateCount();
   }
+  // Switch the panel between chat management and project management
+  function setMode(mode) {
+    bcm3Mode = mode;
+    lastClickedCheckbox = null;
+    document.querySelectorAll('.bcm3-tab').forEach(function(t) {
+      t.classList.toggle('bcm3-tab-active', t.dataset.mode === mode);
+    });
+    // Moving into a project only makes sense for chats; projects can't be archived
+    ['bcm3-project-sel', 'bcm3-refresh-btn', 'bcm3-move-btn', 'bcm3-archive-btn'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = mode === 'projects' ? 'none' : '';
+    });
+    injectCheckboxes();
+  }
   async function startSelectedAction(action) {
     var sel = document.getElementById('bcm3-project-sel');
     var projectId = sel && sel.value;
     var projectName = sel && sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].text || '';
     if (action === 'move' && !projectId) { setStatus('No project selected'); return; }
     var queue = enqueueCurrentSelection(action, projectId, projectName);
-    if (!queue.items.length) { setStatus('No chats selected'); clearMoveQueue(); return; }
+    var noun = bcm3Mode === 'projects' ? 'projects' : 'chats';
+    if (!queue.items.length) { setStatus('No ' + noun + ' selected'); clearMoveQueue(); return; }
     if (action === 'delete') {
-      setStatus('Starting: ' + queue.items.length + ' chats to delete');
+      setStatus('Starting: ' + queue.items.length + ' ' + noun + ' to delete');
     } else if (MENU_ACTIONS[action]) {
-      setStatus('Starting: ' + queue.items.length + ' chats to ' + action);
+      setStatus('Starting: ' + queue.items.length + ' ' + noun + ' to ' + action);
     } else {
       setStatus('Starting: ' + queue.items.length + ' chats to "' + projectName + '"');
     }
@@ -836,16 +892,20 @@
   async function archiveSelected() { await startSelectedAction('archive'); }
   async function deleteSelected() {
     var checked = Array.from(document.querySelectorAll('.bcm3-cb:checked'));
-    if (!checked.length) { setStatus('No chats selected'); return; }
+    if (!checked.length) { setStatus(bcm3Mode === 'projects' ? 'No projects selected' : 'No chats selected'); return; }
     // Ask first to prevent accidental deletion; list up to 10 titles
     var titles = checked.slice(0, 10).map(function(cb) { return '・' + (cb.dataset.title || cb.dataset.convId); });
     if (checked.length > 10) titles.push('…還有 ' + (checked.length - 10) + ' 個');
-    var ok = window.confirm('確定要刪除以下 ' + checked.length + ' 個對話嗎？刪除後無法復原。\n\n' + titles.join('\n'));
+    var msg = bcm3Mode === 'projects'
+      ? '確定要刪除以下 ' + checked.length + ' 個專案嗎？專案內的對話和檔案通常也會一併刪除，無法復原。'
+      : '確定要刪除以下 ' + checked.length + ' 個對話嗎？刪除後無法復原。';
+    var ok = window.confirm(msg + '\n\n' + titles.join('\n'));
     if (!ok) { setStatus('Delete cancelled'); return; }
     await startSelectedAction('delete');
   }
   function init() {
     if (document.getElementById('bcm3-panel')) return;
+    bcm3Mode = 'chats'; // panel always opens on the chat tab
     injectStyle();
     var panel = document.createElement('div');
     panel.id = 'bcm3-panel';
@@ -854,6 +914,10 @@
       '<div id="bcm3-kicker">Extension</div>' +
       '<h3>' + SITE.panelTitle + '</h3>' +
       '<p id="bcm3-sub">' + SITE.panelSubtitle + '</p>' +
+      '</div>' +
+      '<div id="bcm3-tabs">' +
+      '<button class="bcm3-tab bcm3-tab-active" data-mode="chats">對話管理</button>' +
+      '<button class="bcm3-tab" data-mode="projects">專案管理</button>' +
       '</div>' +
       '<div id="bcm3-count">Loading...</div>' +
       '<select id="bcm3-project-sel"><option>Loading...</option></select>' +
@@ -867,6 +931,13 @@
       '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close Organizer</button>' +
       '<div id="bcm3-status">Ready</div>';
     document.body.appendChild(panel);
+    panel.querySelectorAll('.bcm3-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        if (bcm3QueueRunning) { setStatus('Busy — wait for the current task to finish'); return; }
+        setMode(tab.dataset.mode);
+        setStatus(tab.dataset.mode === 'projects' ? 'Project mode' : 'Chat mode');
+      });
+    });
     document.getElementById('bcm3-selall-btn').addEventListener('click', function() {
       var cbs = Array.from(document.querySelectorAll('.bcm3-cb'));
       var shouldSelectAll = cbs.some(function(cb) { return !cb.checked; });
