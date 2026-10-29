@@ -201,7 +201,19 @@
     return r.width > 0 && r.height > 0;
   }
   function normalizeText(s) {
-    return (s || '').trim().replace(/\\s+/g, ' ').toLowerCase();
+    return (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+  // Delete labels across UI languages (ChatGPT/Claude localize these)
+  var DELETE_TEXTS = ['delete', 'delete chat', 'delete conversation', '刪除', '删除', '刪除聊天', '删除聊天', '刪除對話', '删除对话', '削除', '삭제'];
+  function isDeleteText(s) {
+    return DELETE_TEXTS.indexOf(normalizeText(s)) !== -1;
+  }
+  function findDeleteMenuItem() {
+    var items = getVisibleMenuItems();
+    return items.find(function(el) {
+      var tid = el.getAttribute('data-testid') || '';
+      return tid.indexOf('delete') !== -1;
+    }) || items.find(function(el) { return isDeleteText(el.textContent); }) || null;
   }
   function findMenuButtonForChatLink(link) {
     if (!link) return null;
@@ -245,17 +257,13 @@
       || document.querySelector('[data-state="open"]');
     if (dialogEl) {
       var dialogBtns = Array.from(dialogEl.querySelectorAll('button')).filter(isVisibleElement);
-      var found = dialogBtns.find(function(b) {
-        var txt = normalizeText(b.textContent);
-        return txt === 'delete' || txt === 'delete chat' || txt === 'delete conversation';
-      });
+      var found = dialogBtns.find(function(b) { return isDeleteText(b.textContent); });
       if (found) return found;
     }
     // Last resort: visible "Delete" button not inside a menu
     var allBtns = Array.from(document.querySelectorAll('button')).filter(isVisibleElement);
     return allBtns.find(function(b) {
-      var txt = normalizeText(b.textContent);
-      return (txt === 'delete' || txt === 'delete chat' || txt === 'delete conversation')
+      return isDeleteText(b.textContent)
         && !b.closest('[role="menu"]')
         && b.closest('[role="dialog"], [role="alertdialog"], [class*="modal"], [class*="popover"], [data-state="open"]');
     }) || null;
@@ -437,10 +445,7 @@
         await delay(700);
         var deleteItem = null;
         for (var wd = 0; wd < 25; wd++) {
-          var ditems = getVisibleMenuItems();
-          deleteItem = ditems.find(function(el) {
-            return normalizeText(el.textContent) === 'delete';
-          });
+          deleteItem = findDeleteMenuItem();
           if (deleteItem) break;
           await delay(150);
         }
@@ -663,7 +668,7 @@
       cb.type = 'checkbox';
       cb.className = 'bcm3-cb';
       cb.dataset.convId = convId;
-      cb.dataset.title = link.textContent.trim().replace(/\\s+/g, ' ');
+      cb.dataset.title = link.textContent.trim().replace(/\s+/g, ' ');
       cb.addEventListener('change', updateCount);
       cb.addEventListener('click', function(e) {
         e.stopPropagation();
