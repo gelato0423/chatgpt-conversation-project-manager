@@ -129,6 +129,7 @@
       '.bcm3-cb:checked { background:#fafafa; border-color:#fafafa; }',
       '.bcm3-cb:checked::after { content:""; width:7px; height:4px; border:2px solid #111111; border-top:0; border-right:0; transform:rotate(-45deg) translate(1px,-1px); }',
       '#bcm3-panel { position:fixed; right:20px; bottom:20px; width:320px; z-index:999999; color:var(--bcm3-text); font-family:"Geist","SF Pro Text","Segoe UI",sans-serif; font-size:13px; border:1px solid var(--bcm3-border); border-radius:14px; padding:14px; background:radial-gradient(560px 200px at -5% -70%, #1f2937 0%, transparent 58%), radial-gradient(420px 170px at 105% 130%, #1f2937 0%, transparent 60%), color-mix(in srgb, var(--bcm3-panel) 94%, transparent); box-shadow:0 16px 44px rgba(0,0,0,0.45); backdrop-filter:blur(8px); }',
+      '#bcm3-panel { max-height:calc(100vh - 40px); overflow-y:auto; }',
       '#bcm3-head { margin-bottom:10px; }',
       '#bcm3-kicker { display:inline-flex; align-items:center; border:1px solid #343434; border-radius:999px; padding:2px 7px; margin-bottom:7px; color:#d4d4d4; font-size:10px; letter-spacing:.06em; text-transform:uppercase; background:#171717; }',
       '#bcm3-panel h3 { margin:0 0 5px; font-size:15px; font-weight:620; letter-spacing:-.01em; }',
@@ -142,7 +143,7 @@
       '#bcm3-panel button:active { transform:translateY(0); }',
       '#bcm3-move-btn { background:#fafafa; color:#111111; border-color:#fafafa; box-shadow:0 1px 0 rgba(255,255,255,.35) inset; }',
       '#bcm3-delete-btn { background:#2a1111; color:#fca5a5; border-color:#5f2020; }',
-      '#bcm3-refresh-btn, #bcm3-selall-btn, #bcm3-pin-btn { background:#171717; color:#f5f5f5; }',
+      '#bcm3-refresh-btn, #bcm3-selall-btn, #bcm3-pin-btn, #bcm3-unpin-btn, #bcm3-archive-btn { background:#171717; color:#f5f5f5; }',
       '#bcm3-close-btn { background:transparent; color:#a3a3a3; }',
       '#bcm3-status { margin-top:8px; font-size:11px; min-height:16px; color:#d4d4d4; word-break:break-word; line-height:1.4; }'
     ].join(' ');
@@ -253,6 +254,14 @@
   // Pin / unpin labels (exact match, so "釘選" never matches "取消釘選")
   var PIN_TEXTS = ['pin', 'pin chat', '釘選', '置顶', '置頂', '固定', 'ピン留め', '고정'];
   var UNPIN_TEXTS = ['unpin', 'unpin chat', '取消釘選', '取消置顶', '取消置頂', '取消固定', 'ピン留めを解除', '고정 해제'];
+  var ARCHIVE_TEXTS = ['archive', 'archive chat', '封存', '封存對話', '归档', '歸檔', 'アーカイブ', '보관'];
+  // Single-click menu actions. doneTexts = menu item shown when the chat is
+  // already in the target state (e.g. "取消釘選" means it is already pinned).
+  var MENU_ACTIONS = {
+    pin: { word: 'Pin', pastWord: 'Pinned', texts: PIN_TEXTS, doneTexts: UNPIN_TEXTS, alreadyMsg: 'Already pinned' },
+    unpin: { word: 'Unpin', pastWord: 'Unpinned', texts: UNPIN_TEXTS, doneTexts: PIN_TEXTS, alreadyMsg: 'Not pinned' },
+    archive: { word: 'Archive', pastWord: 'Archived', texts: ARCHIVE_TEXTS }
+  };
   function findMenuItemByTexts(texts) {
     return getVisibleMenuItems().find(function(el) {
       return texts.indexOf(normalizeText(el.textContent)) !== -1;
@@ -385,7 +394,7 @@
       reSelectQueuedItems(queue);
       var total = queue.items.length;
       var action = queue.action || 'move';
-      var actionWord = action === 'delete' ? 'Delete' : action === 'pin' ? 'Pin' : 'Move';
+      var actionWord = action === 'delete' ? 'Delete' : MENU_ACTIONS[action] ? MENU_ACTIONS[action].word : 'Move';
       setStatus('Resuming ' + actionWord.toLowerCase() + ': ' + (queue.index + 1) + '/' + total);
       // Process items one after another in the same page (no reloads).
       var item = queue.items[queue.index];
@@ -550,20 +559,22 @@
         setStatus('Deleted ' + queue.moved + '/' + total);
         await delay(400);
         await continueQueue(queue);
-      } else if (action === 'pin') {
+      } else if (MENU_ACTIONS[action]) {
+        // Pin / unpin / archive: open the menu and click one item, no dialog
+        var cfg = MENU_ACTIONS[action];
         realClick(btn);
         await delay(700);
-        var pinItem = null;
-        var alreadyPinned = false;
+        var actItem = null;
+        var alreadyDone = false;
         for (var wp = 0; wp < 25; wp++) {
-          pinItem = findMenuItemByTexts(PIN_TEXTS);
-          if (pinItem) break;
-          if (findMenuItemByTexts(UNPIN_TEXTS)) { alreadyPinned = true; break; }
+          actItem = findMenuItemByTexts(cfg.texts);
+          if (actItem) break;
+          if (cfg.doneTexts && findMenuItemByTexts(cfg.doneTexts)) { alreadyDone = true; break; }
           await delay(150);
         }
-        if (!pinItem) {
+        if (!actItem) {
           setStatus('[' + (queue.index + 1) + '/' + total + '] '
-            + (alreadyPinned ? 'Already pinned' : '"Pin" not found in menu') + ': "' + title + '" (skip)');
+            + (alreadyDone ? cfg.alreadyMsg : '"' + cfg.word + '" not found in menu') + ': "' + title + '" (skip)');
           dismissOpenMenus();
           await delay(500);
           queue.index++;
@@ -572,14 +583,14 @@
           return;
         }
         uncheckChat(item.convId);
-        realHover(pinItem);
+        realHover(actItem);
         await delay(100);
-        realClick(pinItem);
+        realClick(actItem);
         queue.moved++;
         queue.index++;
         writeMoveQueue(queue);
         await delay(1200);
-        setStatus('Pinned ' + queue.moved + '/' + total);
+        setStatus(cfg.pastWord + ' ' + queue.moved + '/' + total);
         await continueQueue(queue);
       }
     } finally {
@@ -594,8 +605,8 @@
       return;
     }
     clearMoveQueue();
-    if (queue.action === 'pin') {
-      setStatus('Done! Pinned ' + queue.moved + '/' + queue.items.length + ' chats.');
+    if (MENU_ACTIONS[queue.action]) {
+      setStatus('Done! ' + MENU_ACTIONS[queue.action].pastWord + ' ' + queue.moved + '/' + queue.items.length + ' chats.');
     } else if (queue.action === 'delete') {
       setStatus('Done! Deleted ' + queue.moved + '/' + queue.items.length + ' chats.');
       // If the chat currently open was deleted, go home instead of staying on a dead URL
@@ -812,8 +823,8 @@
     if (!queue.items.length) { setStatus('No chats selected'); clearMoveQueue(); return; }
     if (action === 'delete') {
       setStatus('Starting: ' + queue.items.length + ' chats to delete');
-    } else if (action === 'pin') {
-      setStatus('Starting: ' + queue.items.length + ' chats to pin');
+    } else if (MENU_ACTIONS[action]) {
+      setStatus('Starting: ' + queue.items.length + ' chats to ' + action);
     } else {
       setStatus('Starting: ' + queue.items.length + ' chats to "' + projectName + '"');
     }
@@ -821,6 +832,8 @@
   }
   async function moveSelected() { await startSelectedAction('move'); }
   async function pinSelected() { await startSelectedAction('pin'); }
+  async function unpinSelected() { await startSelectedAction('unpin'); }
+  async function archiveSelected() { await startSelectedAction('archive'); }
   async function deleteSelected() {
     var checked = Array.from(document.querySelectorAll('.bcm3-cb:checked'));
     if (!checked.length) { setStatus('No chats selected'); return; }
@@ -848,8 +861,10 @@
       '<button id="bcm3-selall-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11 3 3L22 4"></path><path d="m21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2h11"></path></svg>Select / Deselect All</button>' +
       '<button id="bcm3-move-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 14 3-3 3 3"></path><path d="M12 11v9"></path><path d="M2 10V5a2 2 0 0 1 2-2h3l2 3h11a2 2 0 0 1 2 2v2"></path></svg>Move Selected to Project</button>' +
       '<button id="bcm3-pin-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>Pin</button>' +
+      '<button id="bcm3-unpin-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89"></path><path d="m2 2 20 20"></path><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"></path></svg>Unpin</button>' +
+      '<button id="bcm3-archive-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>Archive</button>' +
       '<button id="bcm3-delete-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>Delete</button>' +
-      '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close</button>' +
+      '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close Organizer</button>' +
       '<div id="bcm3-status">Ready</div>';
     document.body.appendChild(panel);
     document.getElementById('bcm3-selall-btn').addEventListener('click', function() {
@@ -864,6 +879,8 @@
     });
     document.getElementById('bcm3-move-btn').addEventListener('click', moveSelected);
     document.getElementById('bcm3-pin-btn').addEventListener('click', pinSelected);
+    document.getElementById('bcm3-unpin-btn').addEventListener('click', unpinSelected);
+    document.getElementById('bcm3-archive-btn').addEventListener('click', archiveSelected);
     document.getElementById('bcm3-delete-btn').addEventListener('click', deleteSelected);
     document.getElementById('bcm3-close-btn').addEventListener('click', function() {
       panelWanted = false;
