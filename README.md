@@ -1,145 +1,108 @@
-# Chat Organizer for ChatGPT & Claude
+# ChatGPT Conversation & Project Manager
 
-> A Chrome extension that brings bulk chat management to ChatGPT, and extends Claude's existing bulk tools directly into the sidebar — select, move, and delete multiple chats in seconds.
+> 批次管理 ChatGPT 對話與專案的 Chrome 擴充功能：一次勾選多個對話或專案，批次移動、釘選、取消釘選、封存、刪除。
 
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome)
-![Version](https://img.shields.io/badge/version-1.1-brightgreen)
-![Platform](https://img.shields.io/badge/platform-chatgpt.com%20%7C%20claude.ai-412991)
+![Version](https://img.shields.io/badge/version-2.0-brightgreen)
+![Platform](https://img.shields.io/badge/platform-chatgpt.com-412991)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
+本專案改自 [kayuling/chat-organizer-extension](https://github.com/kayuling/chat-organizer-extension)（MIT 授權，原作者 Ka Yu）。原專案提供 ChatGPT／Claude 的批次移動與刪除；本專案專注於 ChatGPT，修正了在新版 ChatGPT 與中文介面下的問題，並新增專案管理、釘選、封存等功能。修改內容請見下方「與原專案的差異」與 Git 紀錄。
+
 ---
 
-If you've ever had dozens (or hundreds) of chats cluttering your sidebar, you know how painful it is to manage them one by one. **Chat Organizer** fixes that.
+## 功能
 
-- **ChatGPT** has no native bulk management — the extension adds it entirely, injecting checkboxes and a control panel directly into the sidebar.
-- **Claude** has bulk selection built in, but only on the separate [All Chats](https://claude.ai/recents) page. The extension brings that same power into the sidebar so you never have to leave your current conversation.
+面板分成兩個分頁：
 
-| ChatGPT sidebar | Extension popup | Panel in action |
+| 功能 | 對話管理 | 專案管理 |
 |---|---|---|
-| ![ChatGPT sidebar](screenshots/01-sidebar.png) | ![Extension popup](screenshots/02-popup.png) | ![Panel in action](screenshots/03-panel-in-action.png) |
+| 勾選框（含 Shift 連續勾選） | 一般對話、已釘選對話、專案內的對話 | 側邊欄的專案 |
+| 全選／全不選 | ✅ | ✅ |
+| 批次移到專案 | ✅ | — |
+| 批次釘選／取消釘選 | ✅ | ✅ |
+| 批次封存 | ✅ | —（ChatGPT 專案不能封存） |
+| 批次刪除（會先跳確認視窗） | ✅ | ✅（專案內的對話會一併刪除） |
+
+- **不重新整理頁面**：所有動作都在同一頁面內逐一處理。
+- **支援中文介面**：繁體中文、簡體中文、英文、日文、韓文的選單文字都能辨識。
+- **自動跳過**：已經釘選的不會重複釘選、找不到的項目會略過並在狀態列顯示原因，不會中斷整批工作。
+- **面板預設關閉**：點工具列圖示切到 On 才會出現。
 
 ---
 
-## Features
+## 安裝
 
-- **Works on both ChatGPT and Claude** — the same panel and workflow on `chatgpt.com` and `claude.ai`
-- **Checkbox selection** — every chat in the sidebar gets a checkbox for easy picking
-- **Shift-click range selection** — select a whole block of chats with two clicks
-- **Select All / Deselect All** — one click to grab everything
-- **Bulk Move to Project** — choose a target project from a dropdown and move all selected chats at once
-- **Bulk Delete** — delete multiple chats with automatic confirmation handling
-- **Queue persistence** — operations survive page re-renders and auto-resume where they left off
-- **Auto-reload** — the page refreshes cleanly after a queue finishes
-- **Popup panel toggle** — show or hide the panel from the extension icon without leaving the page
+1. 下載或 clone 這個 repository。
+2. 在 Chrome 開啟 **`chrome://extensions`**。
+3. 開啟右上角的 **開發人員模式**。
+4. 點 **載入未封裝項目**，選擇本專案資料夾。
+5. 把擴充功能圖示釘選到工具列，方便開關面板。
 
 ---
 
-## Requirements
+## 使用方式
 
-- Google Chrome or any Chromium-based browser with **Manifest V3** support
-- An active session on [https://chatgpt.com](https://chatgpt.com) or [https://claude.ai](https://claude.ai)
+1. 前往 [https://chatgpt.com](https://chatgpt.com)。
+2. 點工具列的擴充功能圖示，把 **Panel** 切到 **On**。
+3. 選擇面板上方的 **對話管理** 或 **專案管理**。
+4. 在側邊欄勾選要處理的項目（按住 Shift 可一次勾選一整段）。
+5. 按下要執行的動作，進度會顯示在面板最下方的狀態列。
 
----
-
-## Installation
-
-Since this extension isn't on the Chrome Web Store (yet), load it manually in a couple of steps:
-
-1. Clone or download this repository to your machine.
-2. Open **`chrome://extensions`** in Chrome.
-3. Enable **Developer mode** (toggle in the top-right corner).
-4. Click **Load unpacked**.
-5. Select the `chatgpt-chats-management-tool` folder.
-6. The extension icon appears in your toolbar — pin it for quick access.
+> ⚠️ 刪除無法復原。刪除專案時，專案內的所有對話也會一起刪除。封存的對話可在 ChatGPT「設定 → 資料控管 → 已封存的對話」找回。
 
 ---
 
-## How to Use
+## 與原專案的差異
 
-### Moving chats to a project
-
-1. Go to [https://chatgpt.com](https://chatgpt.com) or [https://claude.ai](https://claude.ai).
-2. Click the extension icon and turn the **Panel** toggle **on**.
-3. Checkboxes appear next to every chat in the sidebar — start selecting.
-4. Use **Shift + click** to select a range of chats quickly.
-5. Pick a target project from the **Project** dropdown in the panel.
-6. Click **Move Selected to Project** and watch the status bar for progress.
-
-### Deleting chats
-
-1. Select the chats you want to remove (same checkbox flow as above).
-2. Click **Delete** in the panel.
-3. The extension handles each confirmation dialog automatically.
-4. The page reloads once all deletions are complete.
-
-> ⚠️ Deletion is permanent. Double-check your selection before hitting Delete.
+| 項目 | 原專案 | 本專案 |
+|---|---|---|
+| 中文介面刪除 | 只認英文「Delete」，中文介面無法刪除 | 用 `data-testid` 與多語系文字辨識 |
+| 刪除流程 | 每刪一個就重新整理，可能出現「ChatGPT 遇到問題」 | 同一頁面內逐一刪除，刪除前先確認 |
+| 「⋯」選單按鈕 | 新版 ChatGPT 找不到 | 從連結往外層尋找並重試 |
+| 勾選框 | 把 ChatGPT 的元素搬進自製容器，造成 React 出錯、捲動載入的對話沒有勾選框 | 勾選框放在連結內部，不搬動任何原生元素 |
+| 專案內的對話 | 無法勾選 | 可勾選 |
+| 專案清單 | 讀瀏覽器舊快取，可能包含已刪除的專案 | 向 ChatGPT 取得最新清單 |
+| 釘選、取消釘選、封存 | 無 | 新增 |
+| 專案管理 | 無 | 新增分頁，可批次釘選、取消釘選、刪除專案 |
+| 支援網站 | ChatGPT、Claude | 僅 ChatGPT |
 
 ---
 
-## File Structure
+## 檔案結構
 
 ```
-chat-organizer-extension/
-├── manifest.json    # Extension config, permissions, and host matching
-├── popup.html       # Popup UI markup and styles
-├── popup.js         # Panel toggle logic and popup state management
-├── content.js       # Sidebar injection, checkbox logic, and queue automation
-└── icons/           # Extension icons (16, 32, 48, 128 px)
+├── manifest.json    # 擴充功能設定、權限
+├── popup.html       # 工具列彈出視窗
+├── popup.js         # 面板開關
+├── content.js       # 側邊欄勾選框、面板與批次處理流程
+└── icons/           # 圖示
 ```
 
----
+## 權限
 
-## Permissions
-
-| Permission | Why it's needed |
+| 權限 | 用途 |
 |---|---|
-| `activeTab` | Interact with the currently open tab from the popup |
-| `scripting` | Inject and execute the panel toggle in the active tab |
-| `host_permissions` → `chatgpt.com/*` | Enable the extension on ChatGPT pages |
-| `host_permissions` → `claude.ai/*` | Enable the extension on Claude pages |
+| `activeTab` | 從彈出視窗操作目前分頁 |
+| `scripting` | 在分頁中開關面板 |
+| `host_permissions` → `chatgpt.com/*` | 在 ChatGPT 頁面上執行 |
 
 ---
 
-## Known Limitations
+## 已知限制
 
-- **DOM dependency** — the extension targets the sidebar structure of each site. If ChatGPT or Claude updates their UI, some selectors may break. Check back here for updates.
-- **Dynamic re-renders** — queue logic is best-effort under heavy sidebar activity. If it stalls, refresh and retry.
-- **Not affiliated with OpenAI or Anthropic** — this is an independent tool, not an official product of either company.
-
----
-
-## Troubleshooting
-
-**Panel doesn't appear**
-Make sure you're on `https://chatgpt.com` or `https://claude.ai`, then open the popup and confirm the toggle is on.
-
-**Projects dropdown is empty**
-Wait a moment for the sidebar to fully load, then click **Refresh Projects** in the panel. On Claude, the extension will automatically open and close the project picker to populate the list.
-
-**Action stops mid-queue**
-Refresh the page, re-select your chats, and run the action again.
-
-**Delete confirmation doesn't fire**
-Wait for the UI to settle after selecting chats, then retry. Rapid selections can sometimes outpace the modal.
+- **依賴 ChatGPT 的網頁結構**：ChatGPT 改版後，部分選擇器可能失效，需要更新 `content.js`。
+- 只會處理側邊欄**已經載入**的項目；請先展開「專案」區塊、往下捲動載入更多對話。
+- 非 OpenAI 官方產品，使用風險自負。
 
 ---
 
-## Development
+## 開發
 
-1. Edit `manifest.json`, `popup.html`, `popup.js`, or `content.js` directly.
-2. Go to `chrome://extensions` and click the **reload** button on the extension card after each change.
-3. Open Chrome DevTools on `chatgpt.com` or `claude.ai` to inspect DOM selectors and debug runtime behavior.
+1. 修改 `manifest.json`、`popup.html`、`popup.js` 或 `content.js`。
+2. 到 `chrome://extensions` 按擴充功能卡片上的重新載入 ↻。
+3. 重新整理 ChatGPT 頁面；可用 DevTools 檢查側邊欄結構與錯誤訊息。
 
----
+## 授權
 
-## Screenshots
-
-| ChatGPT sidebar | Extension popup | Panel in action |
-|---|---|---|
-| ![ChatGPT sidebar](screenshots/01-sidebar.png) | ![Extension popup](screenshots/02-popup.png) | ![Panel in action](screenshots/03-panel-in-action.png) |
-
----
-
-## Disclaimer
-
-Use at your own risk. This project is provided as-is, without warranty of any kind. Exercise caution with irreversible operations like chat deletion — there is no undo.
+MIT。原始程式碼著作權屬於原作者 Ka Yu，本專案的修改同樣以 MIT 授權釋出。

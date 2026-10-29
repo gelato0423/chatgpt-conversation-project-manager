@@ -8,13 +8,8 @@ const popupDesc = document.getElementById('popupDesc');
 const SITE_INFO = {
   chatgpt: {
     match: url => url.includes('chatgpt.com'),
-    title: 'ChatGPT Chat Organizer',
-    desc: 'Select multiple chats in ChatGPT and move them into a Project with one clean workflow.',
-  },
-  claude: {
-    match: url => url.includes('claude.ai'),
-    title: 'Claude Chat Organizer',
-    desc: 'Select multiple chats in Claude and move them into a Project with one clean workflow.',
+    title: 'ChatGPT Conversation & Project Manager',
+    desc: 'Bulk manage ChatGPT conversations and projects: move, pin, archive and delete.',
   },
 };
 
@@ -62,7 +57,7 @@ async function initToggleState() {
     const active = await getActiveTab();
     if (!active) {
       setToggleUI(false);
-      setStatus('Open chatgpt.com or claude.ai to use the toggle.', 'error');
+      setStatus('Open chatgpt.com to use the toggle.', 'error');
       return;
     }
     const { tab, site } = active;
@@ -85,7 +80,7 @@ toggleBtn.addEventListener('click', async () => {
   try {
     const active = await getActiveTab();
     if (!active) {
-      setStatus('Open chatgpt.com or claude.ai and try again.', 'error');
+      setStatus('Open chatgpt.com and try again.', 'error');
       return;
     }
     const { tab } = active;

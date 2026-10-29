@@ -1,21 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT Chat Organizer",
-  "version": "1.0",
-  "description": "Organize ChatGPT sidebar chats with bulk move and delete actions.",
+  "name": "ChatGPT Conversation & Project Manager",
+  "version": "2.0",
+  "description": "Bulk manage ChatGPT conversations and projects: select, move, pin, unpin, archive and delete.",
   "permissions": [
     "activeTab",
     "scripting"
   ],
   "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://claude.ai/*"
+    "https://chatgpt.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://chatgpt.com/*",
-        "https://claude.ai/*"
+        "https://chatgpt.com/*"
       ],
       "js": [
         "content.js"
@@ -35,6 +33,6 @@
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
     },
-    "default_title": "ChatGPT Chat Organizer"
+    "default_title": "ChatGPT Conversation & Project Manager"
   }
 }
