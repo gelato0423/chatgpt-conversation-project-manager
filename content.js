@@ -21,9 +21,10 @@
     }
     return {
       site: 'chatgpt',
-      chatLinkSelector: 'nav a[href^="/c/"]',
+      // Matches both /c/<id> and project chats at /g/g-p-.../c/<id>
+      chatLinkSelector: 'nav a[href*="/c/"]',
       chatHrefPattern: /\/c\/([^?#/]+)/,
-      projectLinkSelector: 'a[href*="/g/g-p-"]',
+      projectLinkSelector: 'a[href*="/g/g-p-"]:not([href*="/c/"])',
       projectHrefPattern: /\/g\/(g-p-[^/?#]+)/,
       moveMenuItemTexts: ['move to project', '移至專案', '移動至專案', '移到專案', '移至项目', '移动到项目', '移到项目', 'プロジェクトに移動'],
       deleteMenuItemText: 'delete',
@@ -84,7 +85,7 @@
     // ChatGPT: sidebar DOM links reflect current projects; the localStorage
     // cache can be stale (deleted projects linger, new ones missing), so it is
     // only used when the sidebar shows no projects at all.
-    var domLinks = Array.from(document.querySelectorAll('a[href*="/g/g-p-"]'));
+    var domLinks = Array.from(document.querySelectorAll(SITE.projectLinkSelector));
     domLinks.forEach(function(a) {
       var m = a.href.match(/[/]g[/](g-p-[^/?#]+)/);
       if (!m) return;
@@ -121,8 +122,7 @@
     style.id = 'bcm3-style';
     style.textContent = [
       ':root { --bcm3-bg:#0a0a0a; --bcm3-panel:#111111; --bcm3-border:#262626; --bcm3-text:#fafafa; --bcm3-muted:#a3a3a3; --bcm3-focus:#525252; }',
-      '.bcm3-wrap { display:flex; align-items:center; gap:4px; padding-left:8px; }',
-      '.bcm3-wrap > a { flex:1; min-width:0; }',
+      'a > .bcm3-cb { margin-right:6px !important; align-self:center; }',
       '.bcm3-cb { -webkit-appearance:none; appearance:none; width:14px; height:14px; min-width:14px; margin:0 3px 0 2px; flex-shrink:0; z-index:10; cursor:pointer; border:1px solid #3f3f46; border-radius:4px; background:#111111; display:inline-grid; place-content:center; transition:border-color .14s ease, background-color .14s ease, transform .14s ease; }',
       '.bcm3-cb:hover { border-color:#737373; background:#171717; }',
       '.bcm3-cb:focus-visible { outline:2px solid #525252; outline-offset:1px; }',
@@ -304,7 +304,7 @@
       var btn = findMenuButtonForChatLink(link);
       if (btn) return btn;
       realHover(link);
-      var row = link.closest('li') || (link.closest('.bcm3-wrap') || link).parentElement;
+      var row = link.closest('li') || link.parentElement;
       if (row) realHover(row);
       await delay(200);
     }
@@ -537,9 +537,7 @@
           await continueQueue(queue);
           return;
         }
-        // Put the link back where ChatGPT rendered it, so React can remove its
-        // own node cleanly (removing a node we re-parented can crash the page).
-        unwrapChatLink(item.convId);
+        uncheckChat(item.convId);
         queue.moved++;
         queue.index++;
         writeMoveQueue(queue);
@@ -573,8 +571,7 @@
           await continueQueue(queue);
           return;
         }
-        // Pinning moves the row to the pinned section; let React move its own node
-        unwrapChatLink(item.convId);
+        uncheckChat(item.convId);
         realHover(pinItem);
         await delay(100);
         realClick(pinItem);
@@ -599,10 +596,8 @@
     clearMoveQueue();
     if (queue.action === 'pin') {
       setStatus('Done! Pinned ' + queue.moved + '/' + queue.items.length + ' chats.');
-      bcm3SkipWrap = {};
     } else if (queue.action === 'delete') {
       setStatus('Done! Deleted ' + queue.moved + '/' + queue.items.length + ' chats.');
-      bcm3SkipWrap = {};
       // If the chat currently open was deleted, go home instead of staying on a dead URL
       var current = convIdFromHref(location.pathname);
       var deletedOpen = current && queue.items.some(function(x) { return x.convId === current; });
@@ -612,15 +607,12 @@
     }
     setTimeout(function() { injectCheckboxes(); updateCount(); }, 1000);
   }
-  var bcm3SkipWrap = {};
-  function unwrapChatLink(convId) {
-    bcm3SkipWrap[convId] = true;
+  // The checkbox lives inside ChatGPT's own link, so React can move or remove
+  // the row freely; we only clear its selection once it has been handled.
+  function uncheckChat(convId) {
     var cb = document.querySelector('.bcm3-cb[data-conv-id="' + convId + '"]');
-    var wrap = cb && cb.closest('.bcm3-wrap');
-    if (!wrap) return;
-    var link = wrap.querySelector('a');
-    if (link) wrap.parentElement.insertBefore(link, wrap);
-    wrap.remove();
+    if (cb) cb.checked = false;
+    updateCount();
   }
   var lastClickedCheckbox = null;
   function handleCheckboxClick(e, cb) {
@@ -777,28 +769,37 @@
     }
     setStatus('Loaded ' + projects.length + ' projects');
   }
+  // The checkbox goes INSIDE the chat link as its first child. We never move
+  // ChatGPT's own nodes: React keeps references to them, and re-parenting them
+  // makes React crash ("ChatGPT 遇到問題") or fail to render newly loaded chats.
   function injectCheckboxes() {
     var links = document.querySelectorAll(SITE.chatLinkSelector);
     links.forEach(function(link) {
-      if (link.parentElement && link.parentElement.classList.contains('bcm3-wrap')) return;
+      if (link.querySelector(':scope > .bcm3-cb')) return;
       var match = link.href.match(SITE.chatHrefPattern);
       var convId = match && match[1];
-      if (!convId || bcm3SkipWrap[convId]) return;
-      var wrap = document.createElement('div');
-      wrap.className = 'bcm3-wrap';
+      if (!convId) return;
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'bcm3-cb';
       cb.dataset.convId = convId;
       cb.dataset.title = link.textContent.trim().replace(/\s+/g, ' ');
-      cb.addEventListener('change', updateCount);
-      cb.addEventListener('click', function(e) {
-        e.stopPropagation();
-        handleCheckboxClick(e, cb);
+      // Keep the link (and React's handlers) from seeing checkbox interactions
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function(t) {
+        cb.addEventListener(t, function(e) { e.stopPropagation(); });
       });
-      link.parentElement.insertBefore(wrap, link);
-      wrap.appendChild(cb);
-      wrap.appendChild(link);
+      cb.addEventListener('click', function(e) {
+        // preventDefault stops the link navigating but also reverts the
+        // checkbox, so re-apply the intended state right after.
+        var want = cb.checked;
+        e.stopPropagation();
+        e.preventDefault();
+        setTimeout(function() {
+          cb.checked = want;
+          handleCheckboxClick(e, cb);
+        }, 0);
+      });
+      link.insertBefore(cb, link.firstChild);
     });
     updateCount();
   }
@@ -872,18 +873,16 @@
       if (s) s.remove();
       if (window._bcmObserver) { window._bcmObserver.disconnect(); window._bcmObserver = null; }
       if (window._bcmProjectObserver) { window._bcmProjectObserver.disconnect(); window._bcmProjectObserver = null; }
-      document.querySelectorAll('.bcm3-wrap').forEach(function(wrap) {
-        var link = wrap.querySelector('a');
-        if (link) wrap.parentElement.insertBefore(link, wrap);
-        wrap.remove();
-      });
+      document.querySelectorAll('.bcm3-cb').forEach(function(cb) { cb.remove(); });
     });
     var injectTimer = null;
     window._bcmObserver = new MutationObserver(function() {
       clearTimeout(injectTimer);
       injectTimer = setTimeout(injectCheckboxes, 300);
     });
-    window._bcmObserver.observe(document.querySelector('nav') || document.body, { childList: true, subtree: true });
+    // Watch the whole page: ChatGPT can replace <nav> and lazy-loads more
+    // chats on scroll, which a nav-only observer would miss.
+    window._bcmObserver.observe(document.body, { childList: true, subtree: true });
     injectCheckboxes();
     var projectTimer = null;
     var knownProjectCount = document.querySelectorAll(SITE.projectLinkSelector).length;
