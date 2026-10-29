@@ -25,7 +25,7 @@
       chatHrefPattern: /\/c\/([^?#/]+)/,
       projectLinkSelector: 'a[href*="/g/g-p-"]',
       projectHrefPattern: /\/g\/(g-p-[^/?#]+)/,
-      moveMenuItemTexts: ['move to project'],
+      moveMenuItemTexts: ['move to project', '移至專案', '移動至專案', '移到專案', '移至项目', '移动到项目', '移到项目', 'プロジェクトに移動'],
       deleteMenuItemText: 'delete',
       panelTitle: 'ChatGPT Chat Organizer',
       panelSubtitle: 'Move selected chats into a project in one pass.'
@@ -34,6 +34,38 @@
   var SITE = getSiteConfig();
 
   // ---------------------------------------------------------------------------
+  // ChatGPT: fetch the live project list from the same endpoint the sidebar uses.
+  // Returns null on any failure so callers can fall back to the DOM.
+  async function fetchChatGPTProjectsFromAPI() {
+    try {
+      var s = await fetch('/api/auth/session', { credentials: 'include' });
+      if (!s.ok) return null;
+      var token = (await s.json()).accessToken;
+      if (!token) return null;
+      var projects = [];
+      var cursor = null;
+      for (var page = 0; page < 20; page++) {
+        var url = '/backend-api/gizmos/snorlax/sidebar?conversations_per_gizmo=0'
+          + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+        var r = await fetch(url, { credentials: 'include', headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) return null;
+        var data = await r.json();
+        (data.items || []).forEach(function(it) {
+          var g = it && it.gizmo && it.gizmo.gizmo;
+          if (!g || !g.id || g.id.indexOf('g-p-') !== 0) return;
+          var id = g.short_url || g.id;
+          var name = (g.display && g.display.name) || g.name || id;
+          if (!projects.find(function(x) { return x.id === id; }))
+            projects.push({ id: id, name: name });
+        });
+        cursor = data.cursor;
+        if (!cursor) break;
+      }
+      return projects;
+    } catch (e) {
+      return null;
+    }
+  }
   function fetchAllProjects() {
     var projects = [];
     // Claude.ai: read project links directly from the sidebar DOM
@@ -49,7 +81,19 @@
       });
       return projects;
     }
-    // ChatGPT: read from localStorage + DOM links
+    // ChatGPT: sidebar DOM links reflect current projects; the localStorage
+    // cache can be stale (deleted projects linger, new ones missing), so it is
+    // only used when the sidebar shows no projects at all.
+    var domLinks = Array.from(document.querySelectorAll('a[href*="/g/g-p-"]'));
+    domLinks.forEach(function(a) {
+      var m = a.href.match(/[/]g[/](g-p-[^/?#]+)/);
+      if (!m) return;
+      var id = m[1];
+      var name = a.textContent.trim();
+      if (name && id && !projects.find(function(x) { return x.id === id; }))
+        projects.push({ id: id, name: name });
+    });
+    if (projects.length) return projects;
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
@@ -69,15 +113,6 @@
         }
       }
     } catch (e) {}
-    var domLinks = Array.from(document.querySelectorAll('a[href*="/g/g-p-"]'));
-    domLinks.forEach(function(a) {
-      var m = a.href.match(/[/]g[/](g-p-[^/?#]+)/);
-      if (!m) return;
-      var id = m[1];
-      var name = a.textContent.trim();
-      if (name && id && !projects.find(function(x) { return x.id === id; }))
-        projects.push({ id: id, name: name });
-    });
     return projects;
   }
   function injectStyle() {
@@ -107,7 +142,7 @@
       '#bcm3-panel button:active { transform:translateY(0); }',
       '#bcm3-move-btn { background:#fafafa; color:#111111; border-color:#fafafa; box-shadow:0 1px 0 rgba(255,255,255,.35) inset; }',
       '#bcm3-delete-btn { background:#2a1111; color:#fca5a5; border-color:#5f2020; }',
-      '#bcm3-refresh-btn, #bcm3-selall-btn { background:#171717; color:#f5f5f5; }',
+      '#bcm3-refresh-btn, #bcm3-selall-btn, #bcm3-pin-btn { background:#171717; color:#f5f5f5; }',
       '#bcm3-close-btn { background:transparent; color:#a3a3a3; }',
       '#bcm3-status { margin-top:8px; font-size:11px; min-height:16px; color:#d4d4d4; word-break:break-word; line-height:1.4; }'
     ].join(' ');
@@ -215,6 +250,14 @@
       return tid.indexOf('delete') !== -1;
     }) || items.find(function(el) { return isDeleteText(el.textContent); }) || null;
   }
+  // Pin / unpin labels (exact match, so "釘選" never matches "取消釘選")
+  var PIN_TEXTS = ['pin', 'pin chat', '釘選', '置顶', '置頂', '固定', 'ピン留め', '고정'];
+  var UNPIN_TEXTS = ['unpin', 'unpin chat', '取消釘選', '取消置顶', '取消置頂', '取消固定', 'ピン留めを解除', '고정 해제'];
+  function findMenuItemByTexts(texts) {
+    return getVisibleMenuItems().find(function(el) {
+      return texts.indexOf(normalizeText(el.textContent)) !== -1;
+    }) || null;
+  }
   function findMenuButtonForChatLink(link) {
     if (!link) return null;
     var row = link.closest('li') || link.parentElement;
@@ -225,22 +268,47 @@
         || row.querySelector('button[aria-label*="options" i]')
         || row.querySelector('button');
     }
-    // ChatGPT: Primary: button is inside the <a> tag itself
-    var btn = link.querySelector('button.__menu-item-trailing-btn')
-      || link.querySelector('button[aria-haspopup="menu"]');
+    // ChatGPT: the options button may be inside the <a>, or a sibling of it
+    // (newer layout). Walk up from the link, but stop before an ancestor that
+    // holds other chat links so we never grab another row's button.
+    var selectors = [
+      'button.__menu-item-trailing-btn',
+      'button[data-testid$="-options"]',
+      'button[aria-haspopup="menu"]',
+      'button[aria-label*="options" i]',
+      'button[aria-label*="選項"]',
+      'button[aria-label*="选项"]',
+      'button[aria-label*="更多"]',
+      'button[aria-label*="menu" i]'
+    ];
+    function findIn(scope) {
+      for (var i = 0; i < selectors.length; i++) {
+        var b = scope.querySelector(selectors[i]);
+        if (b) return b;
+      }
+      return null;
+    }
+    var btn = findIn(link);
     if (btn) return btn;
-    // Fallback: check bcm3-wrap parent (after checkbox injection)
-    var wrap = link.closest('.bcm3-wrap');
-    if (wrap) {
-      btn = wrap.querySelector('button.__menu-item-trailing-btn')
-        || wrap.querySelector('button[aria-haspopup="menu"]');
+    var node = link.parentElement;
+    for (var depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+      if (node.tagName === 'NAV') break;
+      if (node.querySelectorAll(SITE.chatLinkSelector).length > 1) break;
+      btn = findIn(node);
       if (btn) return btn;
     }
-    return row.querySelector('button.__menu-item-trailing-btn')
-      || row.querySelector('button[aria-haspopup="menu"]')
-      || row.querySelector('button[aria-label*="options" i]')
-      || row.querySelector('button[aria-label*="menu" i]')
-      || row.querySelector('button');
+    return null;
+  }
+  async function waitForMenuButton(link) {
+    for (var i = 0; i < 10; i++) {
+      var btn = findMenuButtonForChatLink(link);
+      if (btn) return btn;
+      realHover(link);
+      var row = link.closest('li') || (link.closest('.bcm3-wrap') || link).parentElement;
+      if (row) realHover(row);
+      await delay(200);
+    }
+    return null;
   }
   function dismissOpenMenus() {
     var active = document.activeElement || document.body;
@@ -317,10 +385,9 @@
       reSelectQueuedItems(queue);
       var total = queue.items.length;
       var action = queue.action || 'move';
-      var actionWord = action === 'delete' ? 'Delete' : 'Move';
+      var actionWord = action === 'delete' ? 'Delete' : action === 'pin' ? 'Pin' : 'Move';
       setStatus('Resuming ' + actionWord.toLowerCase() + ': ' + (queue.index + 1) + '/' + total);
-      // Process ONE item per page load for delete action (reload after each deletion),
-      // or all items in one pass for move action.
+      // Process items one after another in the same page (no reloads).
       var item = queue.items[queue.index];
       var title = item.title || item.convId || '';
       // Find the chat link
@@ -334,26 +401,21 @@
         setStatus('[' + (queue.index + 1) + '/' + total + '] Chat not found: "' + title + '" (skip)');
         queue.index++;
         writeMoveQueue(queue);
-        // Reload to continue with next item
-        if (action === 'delete' && queue.index < total) {
-          await delay(500);
-          location.reload();
-        }
+        await delay(500);
+        await continueQueue(queue);
         return;
       }
       link.scrollIntoView({ behavior: 'instant', block: 'center' });
       await delay(300);
       realHover(link);
       await delay(500);
-      var btn = findMenuButtonForChatLink(link);
+      var btn = await waitForMenuButton(link);
       if (!btn) {
         setStatus('[' + (queue.index + 1) + '/' + total + '] No menu button: "' + title + '" (skip)');
         queue.index++;
         writeMoveQueue(queue);
-        if (action === 'delete' && queue.index < total) {
-          await delay(500);
-          location.reload();
-        }
+        await delay(500);
+        await continueQueue(queue);
         return;
       }
       setStatus('[' + (queue.index + 1) + '/' + total + '] ' + actionWord + ' "' + title + '"...');
@@ -367,6 +429,11 @@
           moveItem = mitems.find(function(el) {
             var t = normalizeText(el.textContent);
             return SITE.moveMenuItemTexts.some(function(s) { return t.indexOf(s) === 0; });
+          }) || mitems.find(function(el) {
+            // Fallback for other wordings: a submenu item mentioning "project"
+            var t = normalizeText(el.textContent);
+            return el.getAttribute('aria-haspopup') === 'menu'
+              && /project|專案|项目|項目|プロジェクト/.test(t);
           });
           if (moveItem) break;
           await delay(150);
@@ -432,14 +499,7 @@
         if (liveCb) liveCb.checked = false;
         updateCount();
         await delay(950);
-        if (queue.index < total) {
-          bcm3QueueRunning = false;
-          await processMoveQueue();
-        } else {
-          setStatus('Done! Moved ' + queue.moved + '/' + total + ' to "' + queue.projectName + '"');
-          clearMoveQueue();
-          setTimeout(function() { injectCheckboxes(); updateCount(); }, 1000);
-        }
+        await continueQueue(queue);
       } else if (action === 'delete') {
         realClick(btn);
         await delay(700);
@@ -452,12 +512,10 @@
         if (!deleteItem) {
           setStatus('[' + (queue.index + 1) + '/' + total + '] "Delete" not found in menu (skip)');
           dismissOpenMenus();
-          await delay(300);
+          await delay(500);
           queue.index++;
           writeMoveQueue(queue);
-          // Reload to try next item
-          await delay(500);
-          location.reload();
+          await continueQueue(queue);
           return;
         }
         realHover(deleteItem);
@@ -473,35 +531,96 @@
         if (!confirmDelete) {
           setStatus('[' + (queue.index + 1) + '/' + total + '] Confirm button not found (skip)');
           dismissOpenMenus();
-          await delay(300);
+          await delay(500);
           queue.index++;
           writeMoveQueue(queue);
-          await delay(500);
-          location.reload();
+          await continueQueue(queue);
           return;
         }
-        // Click confirm — advance queue BEFORE reload so index is correct on resume
+        // Put the link back where ChatGPT rendered it, so React can remove its
+        // own node cleanly (removing a node we re-parented can crash the page).
+        unwrapChatLink(item.convId);
         queue.moved++;
         queue.index++;
         writeMoveQueue(queue);
         realClick(confirmDelete);
-        // Wait briefly for the deletion to register, then reload.
-        // On reload, processMoveQueue will auto-resume from the updated index.
-        await delay(1200);
-        if (queue.index < total) {
-          setStatus('Deleted ' + queue.moved + '/' + total + '. Reloading for next...');
-          location.reload();
-        } else {
-          // All done — clear queue and reload one final time to clean up
-          setStatus('Done! Deleted ' + queue.moved + '/' + total + ' chats. Reloading...');
-          clearMoveQueue();
-          await delay(800);
-          location.reload();
+        // Wait until the chat disappears from the sidebar (or give up after ~6s)
+        for (var wg = 0; wg < 30; wg++) {
+          await delay(200);
+          if (!findChatLinkByConvId(item.convId) && !findDeleteConfirmButton()) break;
         }
+        setStatus('Deleted ' + queue.moved + '/' + total);
+        await delay(400);
+        await continueQueue(queue);
+      } else if (action === 'pin') {
+        realClick(btn);
+        await delay(700);
+        var pinItem = null;
+        var alreadyPinned = false;
+        for (var wp = 0; wp < 25; wp++) {
+          pinItem = findMenuItemByTexts(PIN_TEXTS);
+          if (pinItem) break;
+          if (findMenuItemByTexts(UNPIN_TEXTS)) { alreadyPinned = true; break; }
+          await delay(150);
+        }
+        if (!pinItem) {
+          setStatus('[' + (queue.index + 1) + '/' + total + '] '
+            + (alreadyPinned ? 'Already pinned' : '"Pin" not found in menu') + ': "' + title + '" (skip)');
+          dismissOpenMenus();
+          await delay(500);
+          queue.index++;
+          writeMoveQueue(queue);
+          await continueQueue(queue);
+          return;
+        }
+        // Pinning moves the row to the pinned section; let React move its own node
+        unwrapChatLink(item.convId);
+        realHover(pinItem);
+        await delay(100);
+        realClick(pinItem);
+        queue.moved++;
+        queue.index++;
+        writeMoveQueue(queue);
+        await delay(1200);
+        setStatus('Pinned ' + queue.moved + '/' + total);
+        await continueQueue(queue);
       }
     } finally {
       bcm3QueueRunning = false;
     }
+  }
+  // Run the next queued item in this same page, or finish up.
+  async function continueQueue(queue) {
+    if (queue.index < queue.items.length) {
+      bcm3QueueRunning = false;
+      await processMoveQueue();
+      return;
+    }
+    clearMoveQueue();
+    if (queue.action === 'pin') {
+      setStatus('Done! Pinned ' + queue.moved + '/' + queue.items.length + ' chats.');
+      bcm3SkipWrap = {};
+    } else if (queue.action === 'delete') {
+      setStatus('Done! Deleted ' + queue.moved + '/' + queue.items.length + ' chats.');
+      bcm3SkipWrap = {};
+      // If the chat currently open was deleted, go home instead of staying on a dead URL
+      var current = convIdFromHref(location.pathname);
+      var deletedOpen = current && queue.items.some(function(x) { return x.convId === current; });
+      if (deletedOpen) location.assign('/');
+    } else {
+      setStatus('Done! Moved ' + queue.moved + '/' + queue.items.length + ' to "' + queue.projectName + '"');
+    }
+    setTimeout(function() { injectCheckboxes(); updateCount(); }, 1000);
+  }
+  var bcm3SkipWrap = {};
+  function unwrapChatLink(convId) {
+    bcm3SkipWrap[convId] = true;
+    var cb = document.querySelector('.bcm3-cb[data-conv-id="' + convId + '"]');
+    var wrap = cb && cb.closest('.bcm3-wrap');
+    if (!wrap) return;
+    var link = wrap.querySelector('a');
+    if (link) wrap.parentElement.insertBefore(link, wrap);
+    wrap.remove();
   }
   var lastClickedCheckbox = null;
   function handleCheckboxClick(e, cb) {
@@ -627,8 +746,9 @@
   async function loadProjects(forceModal) {
     var sel = document.getElementById('bcm3-project-sel');
     if (!sel) return;
-    // Fast DOM scan first
-    var projects = fetchAllProjects();
+    // ChatGPT: live API first; Claude.ai and fallback: fast DOM scan
+    var projects = SITE.site === 'chatgpt' ? await fetchChatGPTProjectsFromAPI() : null;
+    if (!projects || !projects.length) projects = fetchAllProjects();
     // On Claude.ai, try the internal API next (silent, no UI changes).
     if (!projects.length && SITE.site === 'claude') {
       projects = await fetchProjectsFromClaudeAPI();
@@ -644,8 +764,10 @@
       lastProjectCount = 0;
       return;
     }
-    if (projects.length === lastProjectCount) return;
-    lastProjectCount = projects.length;
+    // Compare by content, not count, so delete-one-add-one still refreshes
+    var signature = projects.map(function(p) { return p.id + ':' + p.name; }).join('|');
+    if (signature === lastProjectCount) return;
+    lastProjectCount = signature;
     var currentVal = sel.value;
     sel.innerHTML = projects.map(function(p) {
       return '<option value="' + p.id + '">' + p.name + '</option>';
@@ -661,7 +783,7 @@
       if (link.parentElement && link.parentElement.classList.contains('bcm3-wrap')) return;
       var match = link.href.match(SITE.chatHrefPattern);
       var convId = match && match[1];
-      if (!convId) return;
+      if (!convId || bcm3SkipWrap[convId]) return;
       var wrap = document.createElement('div');
       wrap.className = 'bcm3-wrap';
       var cb = document.createElement('input');
@@ -689,13 +811,25 @@
     if (!queue.items.length) { setStatus('No chats selected'); clearMoveQueue(); return; }
     if (action === 'delete') {
       setStatus('Starting: ' + queue.items.length + ' chats to delete');
+    } else if (action === 'pin') {
+      setStatus('Starting: ' + queue.items.length + ' chats to pin');
     } else {
       setStatus('Starting: ' + queue.items.length + ' chats to "' + projectName + '"');
     }
     await processMoveQueue();
   }
   async function moveSelected() { await startSelectedAction('move'); }
-  async function deleteSelected() { await startSelectedAction('delete'); }
+  async function pinSelected() { await startSelectedAction('pin'); }
+  async function deleteSelected() {
+    var checked = Array.from(document.querySelectorAll('.bcm3-cb:checked'));
+    if (!checked.length) { setStatus('No chats selected'); return; }
+    // Ask first to prevent accidental deletion; list up to 10 titles
+    var titles = checked.slice(0, 10).map(function(cb) { return '・' + (cb.dataset.title || cb.dataset.convId); });
+    if (checked.length > 10) titles.push('…還有 ' + (checked.length - 10) + ' 個');
+    var ok = window.confirm('確定要刪除以下 ' + checked.length + ' 個對話嗎？刪除後無法復原。\n\n' + titles.join('\n'));
+    if (!ok) { setStatus('Delete cancelled'); return; }
+    await startSelectedAction('delete');
+  }
   function init() {
     if (document.getElementById('bcm3-panel')) return;
     injectStyle();
@@ -712,6 +846,7 @@
       '<button id="bcm3-refresh-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>Refresh Projects</button>' +
       '<button id="bcm3-selall-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11 3 3L22 4"></path><path d="m21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2h11"></path></svg>Select / Deselect All</button>' +
       '<button id="bcm3-move-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 14 3-3 3 3"></path><path d="M12 11v9"></path><path d="M2 10V5a2 2 0 0 1 2-2h3l2 3h11a2 2 0 0 1 2 2v2"></path></svg>Move Selected to Project</button>' +
+      '<button id="bcm3-pin-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>Pin</button>' +
       '<button id="bcm3-delete-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>Delete</button>' +
       '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close</button>' +
       '<div id="bcm3-status">Ready</div>';
@@ -727,8 +862,10 @@
       loadProjects(true); // forceModal=true: scrape from picker if DOM scan is empty
     });
     document.getElementById('bcm3-move-btn').addEventListener('click', moveSelected);
+    document.getElementById('bcm3-pin-btn').addEventListener('click', pinSelected);
     document.getElementById('bcm3-delete-btn').addEventListener('click', deleteSelected);
     document.getElementById('bcm3-close-btn').addEventListener('click', function() {
+      panelWanted = false;
       panel.remove();
       lastClickedCheckbox = null;
       var s = document.getElementById('bcm3-style');
@@ -768,15 +905,18 @@
     // Resume any pending queue on page load (the core of the reload-per-delete flow)
     setTimeout(processMoveQueue, 2000);
   }
-  window._bcmInit = init;
-  setTimeout(init, 2000);
-  // Re-run on SPA navigation
+  // Panel is off by default; the popup toggle opens it via _bcmInit.
+  var panelWanted = false;
+  window._bcmInit = function() { panelWanted = true; init(); };
+  // Only auto-open on load when a queued task needs to resume
+  if (readMoveQueue()) setTimeout(function() { panelWanted = true; init(); }, 2000);
+  // Re-run on SPA navigation (only if the user had the panel open)
   var lastUrl = location.href;
   new MutationObserver(function() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       setTimeout(function() {
-        if (!document.getElementById('bcm3-panel')) init();
+        if (panelWanted && !document.getElementById('bcm3-panel')) init();
       }, 1500);
     }
   }).observe(document.body, { childList: true, subtree: true });
