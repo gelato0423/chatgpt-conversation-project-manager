@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+.DS_Store
+# local backups made while developing
+content_v*.js
