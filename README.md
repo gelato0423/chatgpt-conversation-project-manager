@@ -99,9 +99,34 @@
 
 ## 開發
 
-1. 修改 `manifest.json`、`popup.html`、`popup.js` 或 `content.js`。
+1. 修改 `manifest.json`、`popup.html`、`popup.js`、`content.js` 或 `lib/core.js`。
 2. 到 `chrome://extensions` 按擴充功能卡片上的重新載入 ↻。
 3. 重新整理 ChatGPT 頁面；可用 DevTools 檢查側邊欄結構與錯誤訊息。
+
+### 程式架構
+
+| 檔案 | 內容 |
+|---|---|
+| `lib/core.js` | 不依賴實際網頁的純邏輯：多語系選單文字比對、網址與專案 ID 解析、ChatGPT 選擇器、刪除確認訊息 |
+| `content.js` | 操作 ChatGPT 頁面：插入勾選框、面板、開啟選單並逐一執行批次動作 |
+
+`manifest.json` 會先載入 `lib/core.js`，`content.js` 再透過 `BCM3Core` 使用它。
+
+### 測試
+
+使用 [Jest](https://jestjs.io/) 與 jsdom（在 Node.js 中模擬網頁），不需要開啟 ChatGPT。
+
+```bash
+npm install
+npm test
+```
+
+- `tests/core.test.js`：`lib/core.js` 的單元測試。以 `regression:` 開頭的測試，對應開發過程中修過的 bug，避免同樣的問題再次發生。
+- `tests/content.test.js`：整合測試。以實際擷取的 ChatGPT 側邊欄 HTML 結構建立假頁面，載入真正的 `content.js`，驗證勾選框位置、分頁切換、刪除確認等行為。
+
+每次 push 或開 Pull Request 時，GitHub Actions（`.github/workflows/test.yml`）會自動執行語法檢查與所有測試。
+
+> 實際對 ChatGPT 執行刪除、釘選等操作仍需手動測試，因為測試環境無法登入 ChatGPT。
 
 ## 授權
 
