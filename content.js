@@ -1,6 +1,10 @@
 (function () {
   'use strict';
 
+  // Pure helpers (text matching, id parsing, selectors) live in lib/core.js,
+  // which manifest.json loads first; they are unit-tested under tests/.
+  var Core = globalThis.BCM3Core;
+
   // ---------------------------------------------------------------------------
   // Site detection — returns config for ChatGPT or Claude.ai
   // ---------------------------------------------------------------------------
@@ -21,15 +25,11 @@
     }
     return {
       site: 'chatgpt',
-      // Matches both /c/<id> and project chats at /g/g-p-.../c/<id>
-      chatLinkSelector: 'nav a[href*="/c/"]',
-      chatHrefPattern: /\/c\/([^?#/]+)/,
-      // Sidebar only (the page header also links the open project)
-      // Sidebar project rows are <div role="button"> carrying the id/label in
-      // data attributes. (Plain /g/g-p- links also appear in the page header.)
-      projectLinkSelector: 'nav [data-app-action-sidebar-project-row]',
-      projectHrefPattern: /\/g\/(g-p-[^/?#]+)/,
-      moveMenuItemTexts: ['move to project', '移至專案', '移動至專案', '移到專案', '移至项目', '移动到项目', '移到项目', 'プロジェクトに移動'],
+      chatLinkSelector: Core.CHATGPT.chatLinkSelector,
+      chatHrefPattern: Core.CHATGPT.chatHrefPattern,
+      projectLinkSelector: Core.CHATGPT.projectLinkSelector,
+      projectHrefPattern: Core.CHATGPT.projectHrefPattern,
+      moveMenuItemTexts: Core.CHATGPT.moveMenuItemTexts,
       deleteMenuItemText: 'delete',
       panelTitle: 'ChatGPT Chat Organizer',
       panelSubtitle: 'Move selected chats into a project in one pass.'
@@ -184,16 +184,8 @@
   function targetPattern() {
     return bcm3Mode === 'projects' ? SITE.projectHrefPattern : SITE.chatHrefPattern;
   }
-  // Project rows may be links (id in href) or divs (id in a data attribute)
-  function projectIdOf(el) {
-    var id = el.getAttribute('data-app-action-sidebar-project-id');
-    if (id) return id;
-    var m = (el.getAttribute('href') || '').match(SITE.projectHrefPattern);
-    return m && m[1] || '';
-  }
-  function projectNameOf(el) {
-    return (el.getAttribute('data-app-action-sidebar-project-label') || el.textContent || '').trim();
-  }
+  function projectIdOf(el) { return Core.projectIdOf(el, SITE.projectHrefPattern); }
+  var projectNameOf = Core.projectNameOf;
   // Id of a sidebar row for the current mode (chat id or project id)
   function targetIdOf(el) {
     if (bcm3Mode === 'projects') return projectIdOf(el);
@@ -221,8 +213,7 @@
   }
   // Id of the current target kind (chat id, or project id in project mode)
   function convIdFromHref(href) {
-    var m = (href || '').match(targetPattern());
-    return m && m[1] || '';
+    return Core.idFromHref(href, targetPattern());
   }
   function findChatLinkByConvId(convId) {
     if (!convId) return null;
@@ -266,14 +257,9 @@
     var r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   }
-  function normalizeText(s) {
-    return (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  }
-  // Delete labels across UI languages (ChatGPT/Claude localize these)
-  var DELETE_TEXTS = ['delete', 'delete chat', 'delete conversation', 'delete project', '刪除', '删除', '刪除聊天', '删除聊天', '刪除對話', '删除对话', '刪除專案', '删除项目', '刪除項目', '削除', '삭제'];
-  function isDeleteText(s) {
-    return DELETE_TEXTS.indexOf(normalizeText(s)) !== -1;
-  }
+  var normalizeText = Core.normalizeText;
+  var isDeleteText = Core.isDeleteText;
+  var MENU_ACTIONS = Core.MENU_ACTIONS;
   function findDeleteMenuItem() {
     var items = getVisibleMenuItems();
     return items.find(function(el) {
@@ -281,21 +267,9 @@
       return tid.indexOf('delete') !== -1;
     }) || items.find(function(el) { return isDeleteText(el.textContent); }) || null;
   }
-  // Pin / unpin labels (exact match, so "釘選" never matches "取消釘選")
-  // Project menus say "釘選專案" / "取消釘選專案" instead of the bare verb
-  var PIN_TEXTS = ['pin', 'pin chat', 'pin project', '釘選', '釘選專案', '置顶', '置頂', '置顶项目', '固定', 'ピン留め', '고정'];
-  var UNPIN_TEXTS = ['unpin', 'unpin chat', 'unpin project', '取消釘選', '取消釘選專案', '取消置顶', '取消置頂', '取消置顶项目', '取消固定', 'ピン留めを解除', '고정 해제'];
-  var ARCHIVE_TEXTS = ['archive', 'archive chat', '封存', '封存對話', '归档', '歸檔', 'アーカイブ', '보관'];
-  // Single-click menu actions. doneTexts = menu item shown when the chat is
-  // already in the target state (e.g. "取消釘選" means it is already pinned).
-  var MENU_ACTIONS = {
-    pin: { word: 'Pin', pastWord: 'Pinned', texts: PIN_TEXTS, doneTexts: UNPIN_TEXTS, alreadyMsg: 'Already pinned' },
-    unpin: { word: 'Unpin', pastWord: 'Unpinned', texts: UNPIN_TEXTS, doneTexts: PIN_TEXTS, alreadyMsg: 'Not pinned' },
-    archive: { word: 'Archive', pastWord: 'Archived', texts: ARCHIVE_TEXTS }
-  };
   function findMenuItemByTexts(texts) {
     return getVisibleMenuItems().find(function(el) {
-      return texts.indexOf(normalizeText(el.textContent)) !== -1;
+      return Core.matchesText(texts, el.textContent);
     }) || null;
   }
   function findMenuButtonForChatLink(link) {
@@ -360,11 +334,7 @@
     // Try data-testid first
     var exactConfirm = document.querySelector('button[data-testid="delete-conversation-confirm-button"]');
     if (isVisibleElement(exactConfirm)) return exactConfirm;
-    // Longer labels, e.g. project delete: 從「對話」和「工作」中刪除
-    function looksLikeDelete(b) {
-      var t = normalizeText(b.textContent);
-      return /刪除|删除|delete|削除|삭제/.test(t) && !/取消|cancel/.test(t);
-    }
+    function looksLikeDelete(b) { return Core.looksLikeDeleteConfirm(b.textContent); }
     // Search every visible dialog (the first one in the DOM may be a hidden leftover)
     var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).filter(isVisibleElement);
     for (var d = 0; d < dialogs.length; d++) {
@@ -473,13 +443,11 @@
         for (var w = 0; w < 25; w++) {
           var mitems = getVisibleMenuItems();
           moveItem = mitems.find(function(el) {
-            var t = normalizeText(el.textContent);
-            return SITE.moveMenuItemTexts.some(function(s) { return t.indexOf(s) === 0; });
+            return Core.isMoveMenuText(el.textContent, SITE.moveMenuItemTexts);
           }) || mitems.find(function(el) {
             // Fallback for other wordings: a submenu item mentioning "project"
-            var t = normalizeText(el.textContent);
             return el.getAttribute('aria-haspopup') === 'menu'
-              && /project|專案|项目|項目|プロジェクト/.test(t);
+              && Core.looksLikeProjectSubmenu(el.textContent);
           });
           if (moveItem) break;
           await delay(150);
@@ -893,13 +861,9 @@
   async function deleteSelected() {
     var checked = Array.from(document.querySelectorAll('.bcm3-cb:checked'));
     if (!checked.length) { setStatus(bcm3Mode === 'projects' ? 'No projects selected' : 'No chats selected'); return; }
-    // Ask first to prevent accidental deletion; list up to 10 titles
-    var titles = checked.slice(0, 10).map(function(cb) { return '・' + (cb.dataset.title || cb.dataset.convId); });
-    if (checked.length > 10) titles.push('…還有 ' + (checked.length - 10) + ' 個');
-    var msg = bcm3Mode === 'projects'
-      ? '確定要刪除以下 ' + checked.length + ' 個專案嗎？專案內的對話和檔案通常也會一併刪除，無法復原。'
-      : '確定要刪除以下 ' + checked.length + ' 個對話嗎？刪除後無法復原。';
-    var ok = window.confirm(msg + '\n\n' + titles.join('\n'));
+    // Ask first to prevent accidental deletion
+    var titles = checked.map(function(cb) { return cb.dataset.title || cb.dataset.convId; });
+    var ok = window.confirm(Core.buildDeleteConfirmMessage(bcm3Mode, titles));
     if (!ok) { setStatus('Delete cancelled'); return; }
     await startSelectedAction('delete');
   }
@@ -999,12 +963,13 @@
   if (readMoveQueue()) setTimeout(function() { panelWanted = true; init(); }, 2000);
   // Re-run on SPA navigation (only if the user had the panel open)
   var lastUrl = location.href;
-  new MutationObserver(function() {
+  window._bcmNavObserver = new MutationObserver(function() {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       setTimeout(function() {
         if (panelWanted && !document.getElementById('bcm3-panel')) init();
       }, 1500);
     }
-  }).observe(document.body, { childList: true, subtree: true });
+  });
+  window._bcmNavObserver.observe(document.body, { childList: true, subtree: true });
 })();
