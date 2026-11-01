@@ -89,8 +89,10 @@ toggleBtn.addEventListener('click', async () => {
       func: () => {
         const panel = document.getElementById('bcm3-panel');
         if (panel) {
-          panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-          return panel.style.display !== 'none';
+          // Off = same as Close Manager: remove the panel and the sidebar checkboxes
+          if (window._bcmClose) { window._bcmClose(); return false; }
+          panel.remove();
+          return false;
         } else {
           window._bcmInit && window._bcmInit();
           return true;

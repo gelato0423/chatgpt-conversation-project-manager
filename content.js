@@ -31,8 +31,8 @@
       projectHrefPattern: Core.CHATGPT.projectHrefPattern,
       moveMenuItemTexts: Core.CHATGPT.moveMenuItemTexts,
       deleteMenuItemText: 'delete',
-      panelTitle: 'ChatGPT Chat Organizer',
-      panelSubtitle: 'Move selected chats into a project in one pass.'
+      panelTitle: 'ChatGPT Conversation & Project Manager',
+      panelSubtitle: 'Bulk delete, move, pin and archive chats and projects.'
     };
   }
   var SITE = getSiteConfig();
@@ -789,6 +789,8 @@
   // ChatGPT's own nodes: React keeps references to them, and re-parenting them
   // makes React crash ("ChatGPT 遇到問題") or fail to render newly loaded chats.
   function injectCheckboxes() {
+    // A timer queued before the panel closed must not bring the checkboxes back
+    if (!document.getElementById('bcm3-panel')) return;
     // Drop checkboxes left over from the other tab's kind
     document.querySelectorAll('.bcm3-cb').forEach(function(cb) {
       if (cb.dataset.kind !== bcm3Mode) cb.remove();
@@ -892,7 +894,7 @@
       '<button id="bcm3-unpin-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89"></path><path d="m2 2 20 20"></path><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"></path></svg>Unpin</button>' +
       '<button id="bcm3-archive-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>Archive</button>' +
       '<button id="bcm3-delete-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>Delete</button>' +
-      '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close Organizer</button>' +
+      '<button id="bcm3-close-btn"><svg class="bcm3-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>Close Manager</button>' +
       '<div id="bcm3-status">Ready</div>';
     document.body.appendChild(panel);
     panel.querySelectorAll('.bcm3-tab').forEach(function(tab) {
@@ -917,16 +919,7 @@
     document.getElementById('bcm3-unpin-btn').addEventListener('click', unpinSelected);
     document.getElementById('bcm3-archive-btn').addEventListener('click', archiveSelected);
     document.getElementById('bcm3-delete-btn').addEventListener('click', deleteSelected);
-    document.getElementById('bcm3-close-btn').addEventListener('click', function() {
-      panelWanted = false;
-      panel.remove();
-      lastClickedCheckbox = null;
-      var s = document.getElementById('bcm3-style');
-      if (s) s.remove();
-      if (window._bcmObserver) { window._bcmObserver.disconnect(); window._bcmObserver = null; }
-      if (window._bcmProjectObserver) { window._bcmProjectObserver.disconnect(); window._bcmProjectObserver = null; }
-      document.querySelectorAll('.bcm3-cb').forEach(function(cb) { cb.remove(); });
-    });
+    document.getElementById('bcm3-close-btn').addEventListener('click', closePanel);
     var injectTimer = null;
     window._bcmObserver = new MutationObserver(function() {
       clearTimeout(injectTimer);
@@ -956,9 +949,22 @@
     // Resume any pending queue on page load (the core of the reload-per-delete flow)
     setTimeout(processMoveQueue, 2000);
   }
-  // Panel is off by default; the popup toggle opens it via _bcmInit.
+  // Close Manager and the popup's Off both tear down the panel AND the checkboxes.
+  function closePanel() {
+    panelWanted = false;
+    var panel = document.getElementById('bcm3-panel');
+    if (panel) panel.remove();
+    lastClickedCheckbox = null;
+    var s = document.getElementById('bcm3-style');
+    if (s) s.remove();
+    if (window._bcmObserver) { window._bcmObserver.disconnect(); window._bcmObserver = null; }
+    if (window._bcmProjectObserver) { window._bcmProjectObserver.disconnect(); window._bcmProjectObserver = null; }
+    document.querySelectorAll('.bcm3-cb').forEach(function(cb) { cb.remove(); });
+  }
+  // Panel is off by default; the popup toggle opens it via _bcmInit and closes it via _bcmClose.
   var panelWanted = false;
   window._bcmInit = function() { panelWanted = true; init(); };
+  window._bcmClose = closePanel;
   // Only auto-open on load when a queued task needs to resume
   if (readMoveQueue()) setTimeout(function() { panelWanted = true; init(); }, 2000);
   // Re-run on SPA navigation (only if the user had the panel open)

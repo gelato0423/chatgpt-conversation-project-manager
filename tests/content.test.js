@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  document.getElementById('bcm3-close-btn').click();
+  window._bcmClose();
   jest.runOnlyPendingTimers();
   jest.useRealTimers();
   // Let pending mutation-observer callbacks run before the next test
@@ -58,8 +58,23 @@ const tab = (mode) => document.querySelector(`.bcm3-tab[data-mode="${mode}"]`);
 
 test('panel opens on the chat tab with both tabs present', () => {
   expect(document.getElementById('bcm3-panel')).not.toBeNull();
+  expect(document.querySelector('#bcm3-head h3').textContent).toBe('ChatGPT Conversation & Project Manager');
   expect(tab('chats').classList.contains('bcm3-tab-active')).toBe(true);
   expect(tab('projects')).not.toBeNull();
+});
+
+test.each([
+  ['Close Manager button', () => document.getElementById('bcm3-close-btn').click()],
+  ['popup Off (_bcmClose)', () => window._bcmClose()],
+])('%s removes the panel and every checkbox', (_name, close) => {
+  expect(checkboxIds()).toEqual(['aaa', 'bbb']);
+  close();
+  expect(document.getElementById('bcm3-panel')).toBeNull();
+  expect(document.querySelectorAll('.bcm3-cb')).toHaveLength(0);
+  // Sidebar changes after closing must not bring the checkboxes back
+  document.querySelector('nav').appendChild(document.createElement('div'));
+  jest.advanceTimersByTime(1000);
+  expect(document.querySelectorAll('.bcm3-cb')).toHaveLength(0);
 });
 
 test('chat mode: normal and project chats get checkboxes, projects do not', () => {
